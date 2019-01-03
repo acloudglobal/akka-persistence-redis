@@ -60,7 +60,7 @@ import scala.collection.immutable.Seq
  *   - `journal:channel:persisted:<id>` anytime a new event is appended to a persistence id `<id>`, the sequenceNr is published
  *   - `journal:channel:tags` anytime a new event is appended to a tag, the tag name is published
  */
-class RedisJournal(conf: Config) extends AsyncWriteJournal {
+class RedisJournal(conf: Config) extends AsyncWriteJournal with ActorLogging {
 
   import RedisKeys._
 
@@ -75,38 +75,57 @@ class RedisJournal(conf: Config) extends AsyncWriteJournal {
 
   implicit val serialization = SerializationExtension(context.system)
 
-  var redis: RedisClient = _
+  var redisPool = scala.collection.mutable.Map[Int, RedisClient]()
+
+  val poolSize = RedisUtils.journalPoolSize(conf).get
 
   override def preStart() {
-    redis = RedisUtils.create(conf)
+    log.info("Start RedisJournal actor...")
+    (0 to poolSize - 1).foreach(x => {
+      log.info("RedisJournal start redis clientId {}", x)
+      redisPool += x -> RedisUtils.create(conf)
+    })
     super.preStart()
   }
 
-  override def postStop() {
-    redis.stop()
+  override def postStop(): Unit = try {
+    redisPool.foreach(x => {
+      log.info("RedisJournal stop redis clientId {}", x._1)
+      x._2.stop();
+    })
+  } finally {
+    log.info("Stop RedisJournal actor...")
     super.postStop()
   }
 
-  def asyncReadHighestSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] =
+  def asyncReadHighestSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = {
+    val redis = getRedis(persistenceId);
     for (highestStored <- redis.get[Long](highestSequenceNrKey(persistenceId)))
       yield highestStored.getOrElse(fromSequenceNr)
+  }
 
-  def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)(recoveryCallback: PersistentRepr => Unit): Future[Unit] =
+  def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)(recoveryCallback: PersistentRepr => Unit): Future[Unit] = {
+    val redis = getRedis(persistenceId);
     for {
       entries <- redis.zrangebyscore[Array[Byte]](journalKey(persistenceId), Limit(fromSequenceNr), Limit(toSequenceNr), Some(0L -> max))
     } yield for {
       entry <- entries
     } recoveryCallback(persistentFromBytes(entry))
+  }
 
-  def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long): Future[Unit] =
+  def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long): Future[Unit] = {
+    val redis = getRedis(persistenceId);
     for {
       _ <- redis.zremrangebyscore(journalKey(persistenceId), Limit(-1), Limit(toSequenceNr))
     } yield ()
+  }
+
 
   def asyncWriteMessages(messages: Seq[AtomicWrite]): Future[Seq[Try[Unit]]] =
     Future.sequence(messages.map(asyncWriteBatch))
 
   private def asyncWriteBatch(a: AtomicWrite): Future[Try[Unit]] = {
+    val redis = getRedis(a.persistenceId);
     val transaction = redis.transaction()
 
     val batchOperations = Future
@@ -155,4 +174,11 @@ class RedisJournal(conf: Config) extends AsyncWriteJournal {
       persistentToBytes(pr) -> Set.empty[String]
   }
 
+  def getRedis(persistenceId: String): RedisClient = {
+    val key = abs(persistenceId.hashCode % poolSize);
+    return redisPool.get(key).get;
+  }
+
+  def abs(x: Int) =
+    if (x < 0) -x else x
 }

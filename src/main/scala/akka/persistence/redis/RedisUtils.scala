@@ -36,6 +36,18 @@ object RedisUtils {
     else
       None
 
+  def snapshotPoolSize(conf: Config): Option[Int] =
+    if (conf.hasPath("redis.snapshotPoolSize"))
+      Some(conf.getInt("redis.snapshotPoolSize"))
+    else
+      Some(2) // 默认开启2个连接
+
+  def journalPoolSize(conf: Config): Option[Int] =
+    if (conf.hasPath("redis.journalPoolSize"))
+      Some(conf.getInt("redis.journalPoolSize"))
+    else
+      Some(2) // 默认开启2个连接
+
   def password(conf: Config): Option[String] =
     if (conf.hasPath("redis.password"))
       Some(conf.getString("redis.password"))

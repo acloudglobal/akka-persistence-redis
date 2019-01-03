@@ -33,11 +33,11 @@ import com.typesafe.config.Config
 import scala.concurrent.Future
 
 /** Stores snapshots inside a redis database.
- *
- *  For each persistence identifier `persistenceId`, it creates one key, namely:
- *  `snapshot:persistenceId` that contains the ordered set of snapshot data. The data order
- *  is the one of `sequenceId`.
- */
+  *
+  *  For each persistence identifier `persistenceId`, it creates one key, namely:
+  *  `snapshot:persistenceId` that contains the ordered set of snapshot data. The data order
+  *  is the one of `sequenceId`.
+  */
 class RedisSnapshotStore(conf: Config) extends SnapshotStore {
 
   import RedisKeys._
@@ -52,22 +52,33 @@ class RedisSnapshotStore(conf: Config) extends SnapshotStore {
 
   def snapshotFromBytes(a: Array[Byte]): Snapshot = serialization.deserialize(a, classOf[Snapshot]).get
 
-  var redis: RedisClient = _
+  var redisPool = scala.collection.mutable.Map[Int, RedisClient]()
+
+  val poolSize = RedisUtils.snapshotPoolSize(conf).get
 
   override def preStart(): Unit = {
-    redis = RedisUtils.create(conf)
+    log.info("Start RedisSnapshotStore actor...")
+    (0 to poolSize - 1).foreach(x => {
+      log.info("SnapshotStore start redis clientId {}", x)
+      redisPool += x -> RedisUtils.create(conf)
+    })
     super.preStart()
   }
 
   override def postStop(): Unit = try {
-    redis.stop()
+    redisPool.foreach(x => {
+      log.info("SnapshotStore stop redis clientId {}", x._1)
+      x._2.stop();
+    })
   } finally {
+    log.info("Stop RedisSnapshotStore actor...")
     super.postStop()
   }
 
-  def deleteAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Unit] =
+  def deleteAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Unit] = {
     // in this case we first load the snapshots matching the sequence number boundaries
     // and among them, we next remove the one matching the timestamp boundaries
+    val redis = getRedis(persistenceId);
     redis
       .zrevrangebyscore[SnapshotEntry](snapshotKey(persistenceId), Limit(criteria.minSequenceNr), Limit(criteria.maxSequenceNr))
       .flatMap { seq =>
@@ -84,13 +95,17 @@ class RedisSnapshotStore(conf: Config) extends SnapshotStore {
         Future.sequence(toremove)
       }
       .map(_ => ())
+  }
 
-  def deleteAsync(metadata: SnapshotMetadata): Future[Unit] =
+  def deleteAsync(metadata: SnapshotMetadata): Future[Unit] = {
+    val redis = getRedis(metadata.persistenceId);
     redis
       .zremrangebyscore(snapshotKey(metadata.persistenceId), Limit(metadata.sequenceNr), Limit(metadata.sequenceNr))
       .map(_ => ())
+  }
 
-  def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] =
+  def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
+    val redis = getRedis(persistenceId);
     if (criteria == SnapshotSelectionCriteria.None) {
       Future.successful(None)
     } else if (criteria == SnapshotSelectionCriteria.Latest) {
@@ -121,12 +136,21 @@ class RedisSnapshotStore(conf: Config) extends SnapshotStore {
               .find(sel => criteria.matches(sel.metadata))
         }
     }
+  }
 
   def saveAsync(metadata: SnapshotMetadata, snapshot: Any): Future[Unit] = {
+    val redis = getRedis(metadata.persistenceId);
     val data = ByteString(snapshotToBytes(Snapshot(snapshot)))
     redis
       .zadd(snapshotKey(metadata.persistenceId), (metadata.sequenceNr.toDouble, SnapshotEntry(metadata.sequenceNr, metadata.timestamp, data)))
       .map(_ => ())
   }
 
+  def getRedis(persistenceId: String): RedisClient = {
+    val key = abs(persistenceId.hashCode % poolSize);
+    return redisPool.get(key).get;
+  }
+
+  def abs(x: Int) =
+    if (x < 0) -x else x
 }

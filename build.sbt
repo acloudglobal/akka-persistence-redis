@@ -8,9 +8,9 @@ lazy val publishSettings = Seq(
   publishArtifact in Test := false,
   // The Nexus repo we're publishing to.
   publishTo := (version { (v: String) =>
-    val nexus = "https://oss.sonatype.org/"
-      if (v.trim.endsWith("SNAPSHOT")) Some("snapshots" at nexus + "content/repositories/snapshots")
-      else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+    val nexus = "http://172.16.1.115:8081/"
+    if (v.trim.endsWith("SNAPSHOT")) Some("snapshots" at nexus + "repository/maven-snapshots")
+    else Some("releases" at nexus + "repository/maven-releases")
   }).value,
   pomIncludeRepository := { x => false },
   pomExtra := (
@@ -21,7 +21,7 @@ lazy val publishSettings = Seq(
         <email>satabin@safety-data.com</email>
       </developer>
     </developers>
-    <ciManagement>
+      <ciManagement>
         <system>travis</system>
         <url>https://travis-ci.org/#!/safety-data/akka-persistence-redis</url>
       </ciManagement>
@@ -30,7 +30,7 @@ lazy val publishSettings = Seq(
         <url>https://github.com/safety-data/akka-persistence-redis/issues</url>
       </issueManagement>
     )
-  )
+)
 
 lazy val siteSettings = Seq(
   ghpagesNoJekyll := true,
@@ -49,11 +49,10 @@ lazy val root = project.in(file("."))
   .settings(publishSettings: _*)
   .settings(siteSettings: _*)
   .settings(
-    resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
-    resolvers += "Sonatype Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots/",
-    organization := "com.safety-data",
+    resolvers += Resolver.mavenLocal,
+    organization := "com.acloudchina.akka",
     name := "akka-persistence-redis",
-    version := "0.4.1",
+    version := "1.0.0",
     licenses += ("The Apache Software License, Version 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")),
     homepage := Some(url("https://github.com/safety-data/akka-persistence-redis")),
     scmInfo := Some(ScmInfo(url("https://github.com/safety-data/akka-persistence-redis"), "git@github.com:safety-data/akka-persistence-redis.git")),
@@ -66,8 +65,8 @@ lazy val root = project.in(file("."))
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"))
   .settings(
     scalariformPreferences := {
-    scalariformPreferences.value
-      .setPreference(AlignSingleLineCaseStatements, true)
-      .setPreference(DoubleIndentConstructorArguments, true)
-      .setPreference(MultilineScaladocCommentsStartOnFirstLine, true)
+      scalariformPreferences.value
+        .setPreference(AlignSingleLineCaseStatements, true)
+        .setPreference(DoubleIndentConstructorArguments, true)
+        .setPreference(MultilineScaladocCommentsStartOnFirstLine, true)
     })
