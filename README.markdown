@@ -1,5 +1,5 @@
 # Akka Persistence Redis Plugin
-[![Build Status](https://travis-ci.org/safety-data/akka-persistence-redis.svg?branch=master)](https://travis-ci.org/safety-data/akka-persistence-redis)
+Acloud 定制插件, 增加配置项, 控制RedisSnapshotStore和RedisJournal可用的redis连接数量, 更加PersistentId来进行连接分发。
 
 - [Scaladoc](https://safety-data.github.io/akka-persistence-redis/latest/api/index.html)
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
